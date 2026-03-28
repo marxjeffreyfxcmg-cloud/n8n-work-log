@@ -274,3 +274,68 @@ Schedule Trigger → 读取当前Token → 检查Token有效性 → 需要刷新
 - ✓ 8 个核心数据表存在
 - ✓ 全部工作流无孤立节点
 - ✓ 项目可以正常运行
+
+---
+
+## 2026-03-29 仪表盘前端完善
+
+### 任务描述
+检查 etsy.html 仪表盘与工作流数据的对应关系，修复数据显示和日期筛选问题。
+
+### 发现的问题
+
+#### 问题1: eHunt Token 已过期
+- Token 于 2026-03-25 过期（已过期4天）
+- 导致所有 SOP 流水线在 Step0 失败（18次失败，2次成功）
+- 自 3/23 以来无新产品数据
+
+#### 问题2: 日期筛选"今天/昨天"显示相同
+- 原因：3/28 和 3/29 均无产品数据，两天显示相同的空状态
+- 用户体验差：无法区分"数据确实为空"和"筛选错误"
+
+#### 问题3: 无系统健康告警
+- Token 过期、SOP 连续失败等关键问题无任何前端提示
+- 用户无法快速了解系统运行状态
+
+### 修复内容
+
+#### 1. 新增健康告警系统 (`app.js` + `app.css`)
+- Token 过期检测：显示过期天数，红色严重告警
+- Token 即将过期（≤3天）：黄色警告
+- SOP 连续失败（≥5次）：红色严重告警
+- 数据新鲜度检测（>72小时无新数据）：黄色警告
+- 日期筛选空结果提示：蓝色信息提示
+
+#### 2. Docker 容器状态动态化
+- 后端新增 `get_docker_status()` 函数（dashboard_api.py）
+- 通过 `docker ps` 实时获取容器运行状态
+- 前端从硬编码 `2/2 运行中` 改为读取实际数据
+- 显示 n8n 容器健康状态
+
+#### 3. 竞品分析数据展示
+- 后端新增 `competitor_analysis` SQL 查询
+- 前端已有完整的 `renderCompetitorAnalysis()` 函数
+- 展示：热门标签、热门标题词、价格区间、平均评价、平均评分、物流模式
+
+#### 4. 产品查询性能优化
+- SQL 查询添加 `LIMIT 200`（之前无限制）
+
+#### 5. 配额使用率展示
+- 后端新增 `quota_overview`/`quota_total_daily`/`quota_total_used`
+- 系统状态 Tab 新增配额使用卡片
+
+#### 6. 产品显示增强
+- 表格新增"周销量"和"分类"列
+- 详情弹窗新增周销量和分类信息
+
+### 修改文件汇总
+
+| 文件 | 修改 |
+|------|------|
+| `dashboard_api.py` | 新增 `get_docker_status()`, `competitor_analysis` 查询, `quota_overview` 查询, products LIMIT 200 |
+| `public/app.js` | 新增 `renderHealthAlerts()`, Docker 动态状态, 竞品分析渲染, 配额展示, 产品新字段 |
+| `public/app.css` | 新增 health-alert, date-empty-notice 样式 |
+| `etsy.html` | 新增 healthAlerts 容器, 竞品分析 Tab, 产品表头新列 |
+
+### 需要用户关注
+- **eHunt Token 已过期**：需要手动触发 "eHunt-Token自动刷新" 工作流，或检查登录凭证是否正确
