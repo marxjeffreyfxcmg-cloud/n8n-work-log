@@ -80,3 +80,51 @@
   5. 获得 _identity + ZFSESSID 认证 Cookie: OK
   6. eHunt API 调用验证: OK
 - **结论: 凭证系统迁移成功，用户可通过 n8n UI 随时修改 eHunt 账号密码**
+
+---
+
+## 2026-03-28 eHunt登录流程精简 - 多节点合并为单Code节点
+
+### 任务描述
+将 Python `EHuntClient` 类的逻辑转换为 JavaScript，并把 eHunt-Token自动刷新工作流中原来分散在 9 个节点的登录流程合并为 1 个 Code 节点。
+
+### 完成事项
+- [x] 编写独立的 JS 测试脚本 (`/tmp/ehunt_login_test_v4.js`)，在 n8n 容器中通过 `fetch()` API 完整验证登录流程
+- [x] 测试通过: 解密凭证 → GET CSRF → POST 登录 → 跟随 redirect → 提取 JWT → API 验证 (code=100000)
+- [x] 将 9 个旧节点合并为 1 个 "eHunt登录刷新" Code 节点 + 1 个 "登录验证通过?" IF 节点
+- [x] 保留必要的下游节点: 解析JWT过期时间、保存新Token、清理旧Token、登录失败通知等
+- [x] 通过 PostgreSQL 直接更新 workflow_entity 表应用变更
+- [x] 重启 n8n 确认工作流正常激活
+
+### 移除的节点 (9个)
+| 旧节点 | 类型 | 说明 |
+|--------|------|------|
+| 整理凭证 | Code | 解密逻辑已合并 |
+| 获取CSRF Token | HTTP Request | fetch() 替代 |
+| 提取CSRF Token | Code | 合并到主节点 |
+| 表单登录eHunt | HTTP Request | fetch() 替代 |
+| 归一化登录响应 | Code | 不再需要 |
+| 提取Token从Cookie | Code | 合并到主节点 |
+| 登录成功? | IF | 改用新的 IF 节点 |
+| 登录后验证 | Code | API 验证已合并 |
+| 登录后验证通过? | IF | 改用新的 IF 节点 |
+
+### 新增的节点 (2个)
+| 新节点 | 类型 | 说明 |
+|--------|------|------|
+| eHunt登录刷新 | Code | 完整登录流程: 解密 → CSRF → POST → JWT → 验证 |
+| 登录验证通过? | IF | auth_verified=true → 解析JWT, false → 失败通知 |
+
+### 节点数量变化
+- 旧: 23 个节点
+- 新: 16 个节点 (减少 7 个)
+
+### 工作流连接图 (精简后)
+```
+Schedule Trigger → 读取当前Token → 检查Token有效性 → 需要刷新?
+  ├─ false → Token正常-跳过 → NoOp-完成
+  └─ true → 读取eHunt登录凭证(Postgres) → eHunt登录刷新(Code)
+       → 登录验证通过?(IF)
+        ├─ true → 解析JWT过期时间 → 保存新Token → 构建刷新成功结果 → 清理旧Token → 输出刷新成功结果 → NoOp-完成
+        └─ false → 登录失败通知 → NoOp-完成
+```
