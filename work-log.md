@@ -154,3 +154,93 @@ Schedule Trigger → 读取当前Token → 检查Token有效性 → 需要刷新
 ### 工作方式
 - 使用团队模式: fixer (修复) + reviewer (审查) 并行工作
 - 3个 agent 并行检查，2个 agent 并行修复和审查
+
+---
+
+## 2026-03-28 eHunt Pro 配额利用率优化
+
+### 背景
+用户提供了 eHunt Pro 会员每日 API 配额限制，要求最大化利用率。分析发现：
+- **原利用率**: 1-6% (最好的一天仅 204/6200 次调用)
+- **8/15 个 API 脚本从未使用**: 03, 05, 06, 09, 11, 13, 14, 15 (共 3100 次/日浪费)
+- **Step5-9 的 8 个 eHunt API 调用完全绕过配额追踪系统**
+
+### Phase 1: 数据采集深度扩展（改参数，不加节点）
+
+#### 1.1 Step1 多页抓取 (iOL9f9tbQJNKkFBP)
+- 4 个 Code 节点（Category Ranking, Product Ranking, Bestseller, Shop Ranking）从单页改为 5 页循环
+- 4 个配额扣减节点从 `+1` 改为 `+5`
+- 效果: 4→20 次 API 调用，数据从 50→250 条
+
+#### 1.2 Step2 关键词扩展 (ZWmD4UFMsnz3vQdr)
+- "Parse AI Keywords" 节点: `slice(0, 100)` → `slice(0, 200)`
+- "Get Category Keywords from eHunt" 节点: 单页改为 3 页循环
+- 效果: 每类目从 100→200 关键词
+
+#### 1.3 Step3 蓝海评分扩展 (UM24AFvqv9CEnIK8)
+- "读取待评分关键词" SQL: `LIMIT 100` → `LIMIT 200`
+- "每批20个关键词" splitInBatches: `batchSize: 20` → `50`
+- 效果: 400→800 次 API 调用
+
+#### 1.4 Step4 反查产品扩展 (UzmEtfTxsLI36NWc)
+- "读取A+B级关键词" SQL: `LIMIT 80` → `LIMIT 150`
+- 效果: 70→450 次 API 调用
+
+### Phase 2: 配额追踪修复
+
+#### 2.1 数据库迁移
+- 新增 16 个 quota_config 条目（从 15→31 个脚本）
+- 每日总配额: 6200→12400 次
+- 覆盖所有 Step5-9 使用的 API 端点
+
+#### 2.2 Step5-9 配额追踪 (36mx5obPYV67EsJP)
+- 移除 16 个孤立配额节点（创建但未连接）
+- 在 8 个 API Code 节点内嵌静态数据追踪计数器
+- 新增 "批量扣减配额" Postgres 节点，连接在"合并5步分析结果"之后
+- 追踪脚本映射:
+  - eHunt-Listing对比 → `listing_optimize` (100/日)
+  - eHunt-店铺搜索 → `06_shop_search` (200/日)
+  - eHunt-店铺排行 → `12_shop_ranking` (200/日)
+  - eHunt-广告搜索 → `13_ads_search` (500/日)
+  - eHunt-广告排行 → `14_ads_chart` (500/日)
+  - eHunt-下架产品 → `15_delisted_products` (500/日)
+  - eHunt-下架店铺 → `16_delisted_shops` (200/日)
+  - eHunt-Amazon手工品 → `17_amazon_handmade` (500/日)
+
+#### 2.3 Step3 配额脚本名修复
+- 修复: `14_google_trends` → `13_ads_search` (广告搜索用错了脚本名)
+
+#### 2.4 竞品动态监控配额追踪 (FYmjFnswMq989EVi)
+- 新增 "Track Quota Usage" + "Deduct Monitoring Quota" 节点
+- 连接链: 生成变化摘要 → Track Quota → Deduct → 发送告警通知
+
+### Phase 3: 激活未使用脚本
+
+#### 3.1 Step1 新增 30 天类目分析 (script 03)
+- 新增 7 个节点: Check Quota 03 → IF → Read Token → Call Category Analytics 30d → Deduct 03 → Merge With Branch 5
+- 使用 `/ecommerce/top-list/v1_0/get-list?time=30` 获取长期趋势数据
+- 与现有 7 天数据互补，提供更全面的类目趋势分析
+
+#### 3.2 Step2 新增关键词搜索追踪 (script 09)
+- "Get Keyword Library Data" 节点添加 `09_keyword_search` 追踪
+
+### 预估改善
+
+| 指标 | 优化前 | Phase 1+2 后 | 含 Phase 3 |
+|------|--------|-------------|-----------|
+| 日 API 调用 | 40-200 | 1300-1600 | 1800-2600 |
+| 利用率 | 1-6% | 21-25% | 29-42% |
+| 追踪脚本 | 15/31 | 19/31 | 19/31 |
+| 盲区 API | 8 个 | 0 个 | 0 个 |
+
+### 修改工作流汇总
+
+| 工作流 | 修改类型 | 节点变化 |
+|--------|---------|---------|
+| SOP-步骤1 | 多页+新分支+配额扣减 | 新增 7 节点，修改 8 节点 |
+| SOP-步骤2 | 关键词上限+分页+script09 | 修改 3 节点 |
+| SOP-步骤3 | LIMIT+batchSize+脚本名修复 | 修改 4 节点 |
+| SOP-步骤4 | LIMIT 扩大 | 修改 1 节点 |
+| SOP-步骤5to9 | 内嵌配额追踪+批量扣减 | 删 16，增 1，改 9 节点 |
+| 竞品动态监控 | 配额追踪 | 新增 2 节点 |
+| quota_config | DB 迁移 | 新增 16 条 |
