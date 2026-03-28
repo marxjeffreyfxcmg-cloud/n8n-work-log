@@ -1,0 +1,11 @@
+# n8n 工作日志
+
+本仓库记录 n8n 自动化项目的运维、修改和审查工作日志。
+
+## 目录结构
+- `project-overview.md` - 项目概况和工作流清单
+- `work-log.md` - 按日期的工作记录
+
+## 关联资源
+- n8n 实例: https://n8n.eeba.cn/
+- eHunt 仪表盘: https://n8n.eeba.cn/etsy.html
