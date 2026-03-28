@@ -337,5 +337,37 @@ Schedule Trigger → 读取当前Token → 检查Token有效性 → 需要刷新
 | `public/app.css` | 新增 health-alert, date-empty-notice 样式 |
 | `etsy.html` | 新增 healthAlerts 容器, 竞品分析 Tab, 产品表头新列 |
 
-### 需要用户关注
-- **eHunt Token 已过期**：需要手动触发 "eHunt-Token自动刷新" 工作流，或检查登录凭证是否正确
+### eHunt Token 手动刷新 (2026-03-29)
+
+#### 问题
+- eHunt Token 于 2026-03-25 过期（已过期4天）
+- 导致全部 SOP 流水线在 Step0 失败（18次连续失败）
+- n8n API v1 不支持 POST 触发工作流执行（返回 405）
+
+#### 解决方案
+通过 `docker exec n8n node -e "..."` 在 n8n 容器内直接执行登录流程：
+1. 从 `credentials_entity` 表读取加密凭证
+2. 使用 EVP_BytesToKey (MD5) 解密得到 email/password
+3. GET `https://ehunt.ai/user/login` 获取 CSRF token
+4. POST 登录表单获取 session cookies
+5. 跟随 redirect 到 dashboard-v2 提取 JWT
+6. API 验证 (`get-operate-count`) 确认 token 有效
+7. 保存到 `ehunt_tokens` 表
+
+#### 修复的工作流 Bug
+**"解析JWT过期时间"节点** (eHunt-Token自动刷新 工作流):
+- **Bug 1**: `Buffer.from(b64, 'base64')` 未处理 base64url 编码（JWT 用 `-` 和 `_` 替代 `+` 和 `/`）
+  - 修复: 添加 `.replace(/-/g,'+').replace(/_/g,'/')` 和 padding
+- **Bug 2**: 查找 `payload.exp` 但 eHunt JWT 使用 `payload.expire` 字段
+  - 修复: 改为 `payload.expire || payload.exp`
+
+#### 结果
+- 新 Token ID=3, 过期时间 2026-04-01 03:24:51 (北京时间)
+- API 验证: SUCCESS (code=100000)
+- 仪表盘健康告警已消除
+- 下次 SOP 调度 (0:00/8:00/16:00) 将自动使用新 Token
+
+#### 技术细节
+- `ehunt_tokens` 表结构: id (serial), token (text), cookies (jsonb), expires_at (timestamptz), created_at (timestamptz)
+- n8n 凭证加密: AES-256-CBC + CryptoJS EVP_BytesToKey (MD5)
+- Key derivation: D_1=MD5(pw+salt), D_2=MD5(D_1+pw+salt), D_3=MD5(D_2+pw+salt); key=D_1+D_2[:32], iv=D_3[:16]
