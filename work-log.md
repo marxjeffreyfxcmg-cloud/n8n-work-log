@@ -65,3 +65,18 @@
 - 仅影响 "eHunt-Token自动刷新" 工作流的凭证读取方式
 - 其他工作流不受影响
 - n8n 已重启确认健康
+
+### 凭证可见性修复
+- 凭证最初被创建到个人项目 (`zOpnVIpmzpGAxqqS`)，在团队项目 "eHunt AI 选品" 中不可见
+- 已将凭证移动到团队项目 (`OhuGTTT5zDsyKPN5`)，现在在 UI 中可见
+
+### 用户更新凭证后测试结果 (2026-03-28)
+- 用户通过 n8n UI 更新凭证为 `etsyhunt168@gmail.com` / 新密码
+- 端到端测试全部通过:
+  1. 从 credentials_entity 读取加密数据: OK
+  2. AES-256-CBC 解密: OK (正确提取 email/password)
+  3. 获取 CSRF Token: OK
+  4. 表单登录 eHunt: HTTP 302 重定向到 dashboard-v2
+  5. 获得 _identity + ZFSESSID 认证 Cookie: OK
+  6. eHunt API 调用验证: OK
+- **结论: 凭证系统迁移成功，用户可通过 n8n UI 随时修改 eHunt 账号密码**
