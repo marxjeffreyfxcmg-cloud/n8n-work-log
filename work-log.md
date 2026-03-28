@@ -128,3 +128,29 @@ Schedule Trigger → 读取当前Token → 检查Token有效性 → 需要刷新
         ├─ true → 解析JWT过期时间 → 保存新Token → 构建刷新成功结果 → 清理旧Token → 输出刷新成功结果 → NoOp-完成
         └─ false → 登录失败通知 → NoOp-完成
 ```
+
+---
+
+## 2026-03-28 全工作流健康检查与修复
+
+### 检查范围
+对 eHunt AI 选品项目全部 17 个工作流进行逐个检查，包括节点配置、连接图、SQL 语法、JS 代码、安全性审查。
+
+### 发现并修复的问题
+
+| # | 工作流 | 问题 | 严重性 | 状态 |
+|---|--------|------|--------|------|
+| 1 | 竞品动态监控 (FYmjFnswMq989EVi) | splitInBatches 循环回路断裂 | 高 | 已修复 |
+| 2 | 配额每日重置 (kirP8eODCFZoBfQb) | cron 时区错误 UTC→北京 | 中 | 已修复 |
+| 3 | eHunt-Token自动刷新 (D0o0Q952jalrewzd) | 新合并节点验证 | 中 | 已验证通过 |
+| 4 | SOP-步骤2-关键词挖掘 (ZWmD4UFMsnz3vQdr) | Update Execution Log SQL 损坏 | 高 | 已修复 |
+| 5 | SOP-步骤1-自动挑类目 (iOL9f9tbQJNKkFBP) | Update Execution Log SQL 损坏 | 高 | 已修复 |
+| 6 | SOP-步骤5to9-深度分析 (36mx5obPYV67EsJP) | 5个保存节点SQL注入审查 | 中 | 审查确认安全 |
+
+### 修复后状态
+- 全部 17 个工作流重启后正常激活
+- 无报错
+
+### 工作方式
+- 使用团队模式: fixer (修复) + reviewer (审查) 并行工作
+- 3个 agent 并行检查，2个 agent 并行修复和审查
