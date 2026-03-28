@@ -371,3 +371,73 @@ Schedule Trigger → 读取当前Token → 检查Token有效性 → 需要刷新
 - `ehunt_tokens` 表结构: id (serial), token (text), cookies (jsonb), expires_at (timestamptz), created_at (timestamptz)
 - n8n 凭证加密: AES-256-CBC + CryptoJS EVP_BytesToKey (MD5)
 - Key derivation: D_1=MD5(pw+salt), D_2=MD5(D_1+pw+salt), D_3=MD5(D_2+pw+salt); key=D_1+D_2[:32], iv=D_3[:16]
+
+---
+
+## 2026-03-29 SOP 全流水线验证与修复
+
+### 任务描述
+手动触发 SOP 主调度器，验证全部 13 步流水线能否顺畅完成，并修复执行中发现的问题。
+
+### 发现并修复的问题
+
+| # | 问题 | 影响 | 修复 |
+|---|------|------|------|
+| 1 | Code 节点 Task Runner 超时 (默认60秒) | Step4 反查产品失败 | 添加 `N8N_RUNNERS_TASK_REQUEST_TIMEOUT=300` 环境变量 |
+| 2 | "解析JWT过期时间" 节点 base64url 解码错误 | Token 过期时间解析失败 | 添加 `.replace(/-/g,'+').replace(/_/g,'/')` + padding |
+| 3 | "解析JWT过期时间" 节点查找 `exp` 字段 | JWT 使用自定义 `expire` 字段 | 改为 `payload.expire \|\| payload.exp` |
+| 4 | SOP 主调度器 cron 时区 | UTC 2:00 = 北京 10:00 | 改为 UTC 19:00 = 北京凌晨 3:00 |
+| 5 | 多次 webhook 重试导致 SOP 并发执行 | 数据冲突 | 清理所有 running 执行后重新触发 |
+
+### SOP 流水线验证结果 (2026-03-29 04:37 触发)
+
+| 步骤 | 工作流 | 执行ID | 状态 | 耗时 |
+|------|--------|--------|------|------|
+| 主调度器 | hi3J0nArXh0BEoqO | 279 | **success** | 38分钟 |
+| Step1-自动挑类目 | iOL9f9tbQJNKkFBP | 280 | **success** | 1.6分钟 |
+| Step2-关键词挖掘 | ZWmD4UFMsnz3vQdr | 281 | **success** | 18.3分钟 |
+| Step4-反查产品 | UzmEtfTxsLI36NWc | 282 | **success** | 17.8分钟 |
+| Step5-9-深度分析 | 36mx5obPYV67EsJP | 283 | **success** | 15.4秒 |
+
+### 数据产出
+
+| 指标 | 运行前 | 运行后 | 增量 |
+|------|--------|--------|------|
+| 类目 | 712 | 889 | +177 |
+| 关键词 | 3,815 | 4,466 | +651 |
+| 产品 | 90 | 103 | +13 |
+| 已评分产品 | 0 | 77 | +77 |
+| 配额使用 | 0 | 435/12,400 | 3.5% |
+
+### 全部 17 个工作流验证状态
+
+| 工作流 | 活跃 | 最近状态 | 最近运行 |
+|--------|------|----------|----------|
+| SOP-主调度器 | ✓ | success | 3/29 04:37 |
+| SOP-步骤1-自动挑类目 | ✓ | success | 3/29 04:37 |
+| SOP-步骤2-关键词挖掘 | ✓ | success | 3/29 04:39 |
+| SOP-步骤3-蓝海评分 | ✓ | success | 3/23 14:26 |
+| SOP-步骤4-反查产品 | ✓ | success | 3/29 04:57 |
+| SOP-步骤5to9-深度分析 | ✓ | success | 3/29 05:15 |
+| SOP-步骤10to12-AI生成 | ✓ | success | 3/23 14:39 |
+| SOP-步骤13-日报生成 | ✓ | success | 3/23 14:40 |
+| eHunt-Token自动刷新 | ✓ | success | 3/29 04:00 |
+| 配额每日重置 | ✓ | success | 3/29 00:00 |
+| 竞品动态监控 | ✓ | success | 3/28 06:00 |
+| 每日选品摘要邮件 | ✓ | success | 3/28 09:00 |
+| 周报月报生成 | ✓ | success | 3/23 21:00 |
+| AI辩论系统 | ✓ | success | 3/26 |
+| 邮件通知 | ✓ | success | 3/25 |
+| 全局错误通知 | ✓ | 待触发 | 按需运行 |
+| 通用-配额检查与扣减 | ✓ | success | 3/20 |
+
+### 仪表盘验证
+- ✓ 产品数据已更新 (103个产品, 最新 3/29 05:15)
+- ✓ 关键词数据已更新 (4,466个)
+- ✓ 类目数据已更新 (889个)
+- ✓ Token 过期告警已消除 (4/1 过期)
+- ✓ 配额使用率展示正常 (435/12,400 = 3.5%)
+- ✓ SOP 执行记录可见
+
+### 修改的配置文件
+- `/www/wwwroot/n8n/docker-compose-deploy.yml`: 新增 `N8N_RUNNERS_TASK_REQUEST_TIMEOUT=300` 和 `N8N_API_KEY`
